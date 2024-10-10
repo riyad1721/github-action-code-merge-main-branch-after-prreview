@@ -1,0 +1,67 @@
+name: Auto PR, Approve, and Merge
+
+on:
+  push:
+    branches:
+      - feature/*  # Trigger workflow on any push to branches starting with "feature/"
+
+jobs:
+  create-pull-request:
+    runs-on: ubuntu-latest
+    steps:
+      # Checkout repository
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # Create Pull Request
+      - name: Create Pull Request
+        id: create_pr
+        uses: peter-evans/create-pull-request@v5
+        with:
+          branch: main            # The base branch where the PR will be merged
+          delete-branch: true     # Deletes the feature branch after merge
+          head: ${{ github.ref_name }}  # Dynamically specify the feature branch as the source branch
+          title: "Auto PR from ${{ github.ref_name }}"  # Include branch name in PR title
+          body: "This PR was auto-created from the branch ${{ github.ref_name }} and is ready to merge!"
+          reviewers: 'person1,person2'  # Specify the reviewers for this PR
+      
+  wait-for-approval:
+    runs-on: ubuntu-latest
+    needs: create-pull-request
+    steps:
+      - name: Wait for PR approval
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const { data: pr } = await github.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: ${{ steps.create_pr.outputs.pull_request_number }}
+            });
+            const { data: reviews } = await github.pulls.listReviews({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+            });
+            const approvers = reviews.filter(
+              (review) => review.state === 'APPROVED' && 
+                          (review.user.login === 'person1' || review.user.login === 'person2')
+            );
+            if (approvers.length < 1) {
+              throw new Error('PR needs approval from person1 or person2.');
+            }
+
+  merge-pr:
+    runs-on: ubuntu-latest
+    needs: wait-for-approval
+    steps:
+      # Checkout repository
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      # Merge Pull Request
+      - name: Merge PR
+        uses: pascalgn/automerge-action@v0.14.3
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          merge-method: squash  # You can use "merge" or "rebase" as well
